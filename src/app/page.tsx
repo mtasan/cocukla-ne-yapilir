@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import EventsSection from "@/components/EventsSection";
 
 /* ─── Emoji icon helpers ─── */
 const FEATURES = [
@@ -24,7 +25,7 @@ const FEATURES = [
   },
   {
     icon: "🤖",
-    title: "AI Destekli Öneri",
+    title: "Yapay Zeka Destekli Öneri",
     desc: "\"3 yaşında çocukla Kadıköy'de ne yapılır?\" — anında cevap",
     color: "bg-teal-50 text-teal-600",
   },
@@ -52,7 +53,7 @@ const STEPS = [
   {
     num: "2",
     icon: "✨",
-    title: "AI Öneri Üretir",
+    title: "Yapay Zeka Öneri Üretir",
     desc: "Hava durumu, etkinlik takvimi ve mekan verileri ile akıllı eşleştirme",
   },
   {
@@ -94,6 +95,9 @@ export default function Home() {
             </span>
           </a>
           <div className="hidden items-center gap-8 text-sm font-medium text-gray-600 md:flex">
+            <a href="#etkinlikler" className="transition hover:text-orange-500">
+              Etkinlikler
+            </a>
             <a href="#ozellikler" className="transition hover:text-orange-500">
               Özellikler
             </a>
@@ -135,7 +139,7 @@ export default function Home() {
             <p className="mb-8 max-w-lg text-lg leading-relaxed text-gray-600 md:text-xl">
               Yaş, konum ve hava durumuna göre{" "}
               <strong className="text-gray-900">akıllı aktivite önerileri</strong>.
-              Canlı etkinlikler, mekan puanları ve AI destekli planlama — hepsi
+              Canlı etkinlikler, mekan puanları ve yapay zeka destekli planlama — hepsi
               bir arada.
             </p>
 
@@ -205,7 +209,7 @@ export default function Home() {
               <div className="mt-4 flex items-center justify-between rounded-xl bg-gradient-to-r from-orange-500 to-pink-500 p-3 text-white">
                 <div>
                   <p className="text-xs font-medium opacity-80">
-                    AI Önerisi
+                    Yapay Zeka Önerisi
                   </p>
                   <p className="text-sm font-bold">
                     &quot;Miniatürk sonrası Bebek sahilinde dondurma molası!&quot;
@@ -232,8 +236,8 @@ export default function Home() {
           </div>
           <div className="hidden h-8 w-px bg-gray-200 sm:block" />
           <div>
-            <span className="text-2xl font-bold text-gray-900">AI</span>
-            <p>Akıllı Öneri Motoru</p>
+            <span className="text-2xl font-bold text-gray-900">YZ</span>
+            <p>Yapay Zeka Öneri Motoru</p>
           </div>
           <div className="hidden h-8 w-px bg-gray-200 sm:block" />
           <div>
@@ -276,6 +280,9 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ─── Events ─── */}
+      <EventsSection />
 
       {/* ─── Features ─── */}
       <section id="ozellikler" className="bg-gray-50 py-20 md:py-28">
