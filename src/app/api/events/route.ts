@@ -218,6 +218,101 @@ function isTurkishTeam(team: string): boolean {
   return TURKISH_TEAMS.some((t) => lower.includes(t));
 }
 
+// ─── Date helpers ───
+const TURKISH_MONTHS: Record<string, number> = {
+  ocak: 0, şubat: 1, mart: 2, nisan: 3, mayıs: 4, haziran: 5,
+  temmuz: 6, ağustos: 7, eylül: 8, ekim: 9, kasım: 10, aralık: 11,
+  "subat": 1, "mayis": 4, "agustos": 7, "eylul": 8, "kasim": 10, "aralik": 11,
+};
+
+/**
+ * Parse various date formats into a Date object.
+ * Handles: "2025-03-15", "15 Mart 2025", "03 Şubat - 28 Şubat", "2025-03-15T10:00:00"
+ * For ranges like "03 Şubat - 28 Şubat", returns the END date.
+ */
+function parseEventDate(dateStr: string): Date | null {
+  if (!dateStr) return null;
+
+  // ISO format: "2025-03-15" or "2025-03-15T10:00:00"
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // Turkish date range: "03 Şubat - 28 Şubat" → use end date
+  const rangeMatch = dateStr.match(
+    /(\d{1,2})\s+(\w+)\s*-\s*(\d{1,2})\s+(\w+)\s*(\d{4})?/i
+  );
+  if (rangeMatch) {
+    const endDay = parseInt(rangeMatch[3]);
+    const endMonthStr = rangeMatch[4].toLowerCase();
+    const year = rangeMatch[5] ? parseInt(rangeMatch[5]) : new Date().getFullYear();
+    const endMonth = TURKISH_MONTHS[endMonthStr];
+    if (endMonth !== undefined) {
+      return new Date(year, endMonth, endDay);
+    }
+  }
+
+  // Single Turkish date: "15 Mart 2025" or "15 Mart"
+  const singleMatch = dateStr.match(/(\d{1,2})\s+(\w+)\s*(\d{4})?/i);
+  if (singleMatch) {
+    const day = parseInt(singleMatch[1]);
+    const monthStr = singleMatch[2].toLowerCase();
+    const year = singleMatch[3] ? parseInt(singleMatch[3]) : new Date().getFullYear();
+    const month = TURKISH_MONTHS[monthStr];
+    if (month !== undefined) {
+      return new Date(year, month, day);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Format a date string to dd.mm.yyyy
+ */
+function formatDateDDMMYYYY(dateStr: string): string {
+  const parsed = parseEventDate(dateStr);
+  if (parsed) {
+    const dd = String(parsed.getDate()).padStart(2, "0");
+    const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+    const yyyy = parsed.getFullYear();
+    return `${dd}.${mm}.${yyyy}`;
+  }
+
+  // Date range: "03 Şubat - 28 Şubat" → "03.02 - 28.02"
+  const rangeMatch = dateStr.match(
+    /(\d{1,2})\s+(\w+)\s*-\s*(\d{1,2})\s+(\w+)\s*(\d{4})?/i
+  );
+  if (rangeMatch) {
+    const startDay = rangeMatch[1].padStart(2, "0");
+    const startMonth = TURKISH_MONTHS[rangeMatch[2].toLowerCase()];
+    const endDay = rangeMatch[3].padStart(2, "0");
+    const endMonth = TURKISH_MONTHS[rangeMatch[4].toLowerCase()];
+    const year = rangeMatch[5] || new Date().getFullYear();
+    if (startMonth !== undefined && endMonth !== undefined) {
+      const sm = String(startMonth + 1).padStart(2, "0");
+      const em = String(endMonth + 1).padStart(2, "0");
+      return `${startDay}.${sm}.${year} - ${endDay}.${em}.${year}`;
+    }
+  }
+
+  return dateStr; // return as-is if can't parse
+}
+
+/**
+ * Check if an event date is in the past.
+ * For ranges, checks the end date.
+ * If date can't be parsed, keep the event (don't filter).
+ */
+function isEventInPast(dateStr: string): boolean {
+  const parsed = parseEventDate(dateStr);
+  if (!parsed) return false; // can't parse → keep it
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed < today;
+}
+
 // ─── Main handler ───
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -250,6 +345,15 @@ export async function GET(request: Request) {
       const konserEvents = await fetchEtkinlikIO("konser");
       allEvents.push(...konserEvents);
     }
+
+    // Filter out past events
+    allEvents = allEvents.filter((e) => !isEventInPast(e.date));
+
+    // Format dates to dd.mm.yyyy
+    allEvents = allEvents.map((e) => ({
+      ...e,
+      date: formatDateDDMMYYYY(e.date),
+    }));
 
     // Deduplicate by name (case-insensitive)
     const seen = new Set<string>();
