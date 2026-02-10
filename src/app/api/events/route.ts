@@ -349,6 +349,16 @@ export async function GET(request: Request) {
     // Filter out past events
     allEvents = allEvents.filter((e) => !isEventInPast(e.date));
 
+    // Sort by date: nearest first, unparseable dates go to the end
+    allEvents.sort((a, b) => {
+      const dateA = parseEventDate(a.date);
+      const dateB = parseEventDate(b.date);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA.getTime() - dateB.getTime();
+    });
+
     // Format dates to dd.mm.yyyy
     allEvents = allEvents.map((e) => ({
       ...e,
