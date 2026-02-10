@@ -1,219 +1,286 @@
 import { NextResponse } from "next/server";
 
-// Ticketmaster Discovery API v2
-// Free: 5,000 calls/day — https://developer.ticketmaster.com/
-const TM_BASE = "https://app.ticketmaster.com/discovery/v2/events.json";
-const TM_API_KEY = process.env.TICKETMASTER_API_KEY || "";
-
+// ─── Types ───
 export interface EventItem {
   id: string;
   name: string;
-  date: string;        // "2025-03-15"
-  time: string;        // "14:00"
+  date: string;
+  time: string;
   venue: string;
   city: string;
   image: string;
   url: string;
   category: string;
+  source: string;
   priceRange?: string;
 }
 
-// Fallback events — shown when API key is not set or API fails
-const FALLBACK_EVENTS: EventItem[] = [
-  {
-    id: "f1",
-    name: "Kukla Tiyatrosu: Karagöz ile Hacivat",
-    date: "2025-03-22",
-    time: "11:00",
-    venue: "Zorlu PSM",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Tiyatro",
-    priceRange: "150 - 300 ₺",
-  },
-  {
-    id: "f2",
-    name: "Çocuk Resim Atölyesi",
-    date: "2025-03-23",
-    time: "10:30",
-    venue: "İstanbul Modern",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Atölye",
-    priceRange: "200 ₺",
-  },
-  {
-    id: "f3",
-    name: "Buz Pateni Gösterisi",
-    date: "2025-03-29",
-    time: "15:00",
-    venue: "Silivri Buz Pisti",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Gösteri",
-    priceRange: "100 - 250 ₺",
-  },
-  {
-    id: "f4",
-    name: "Masal Müzikali: Pamuk Prenses",
-    date: "2025-04-05",
-    time: "13:00",
-    venue: "CKM Tiyatro Salonu",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Müzikal",
-    priceRange: "120 - 280 ₺",
-  },
-  {
-    id: "f5",
-    name: "Bilim Şenliği — Deney Atölyesi",
-    date: "2025-04-12",
-    time: "11:00",
-    venue: "Rahmi M. Koç Müzesi",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Atölye",
-    priceRange: "Ücretsiz",
-  },
-  {
-    id: "f6",
-    name: "Çocuk Senfoni Konseri",
-    date: "2025-04-19",
-    time: "14:00",
-    venue: "Lütfi Kırdar ICEC",
-    city: "İstanbul",
-    image: "",
-    url: "#",
-    category: "Konser",
-    priceRange: "80 - 200 ₺",
-  },
-];
-
-function formatTMEvent(raw: Record<string, unknown>): EventItem {
-  const dates = raw.dates as Record<string, unknown> | undefined;
-  const start = dates?.start as Record<string, string> | undefined;
-
-  const embedded = raw._embedded as Record<string, unknown[]> | undefined;
-  const venues = embedded?.venues as Record<string, unknown>[] | undefined;
-  const venue = venues?.[0] as Record<string, unknown> | undefined;
-  const venueCity = venue?.city as Record<string, string> | undefined;
-
-  const images = raw.images as { url: string; width: number }[] | undefined;
-  const bestImage = images?.sort((a, b) => b.width - a.width)[0]?.url || "";
-
-  const classifications = raw.classifications as Record<string, unknown>[] | undefined;
-  const classification = classifications?.[0] as Record<string, Record<string, string>> | undefined;
-  const segment = classification?.segment?.name || classification?.genre?.name || "";
-
-  const prices = raw.priceRanges as { min: number; max: number; currency: string }[] | undefined;
-  let priceRange: string | undefined;
-  if (prices && prices.length > 0) {
-    const p = prices[0];
-    priceRange = p.min === p.max
-      ? `${p.min} ${p.currency}`
-      : `${p.min} - ${p.max} ${p.currency}`;
-  }
-
-  return {
-    id: raw.id as string,
-    name: raw.name as string,
-    date: start?.localDate || "",
-    time: start?.localTime?.slice(0, 5) || "",
-    venue: (venue?.name as string) || "",
-    city: venueCity?.name || "İstanbul",
-    image: bestImage,
-    url: (raw.url as string) || "#",
-    category: segment,
-    priceRange,
-  };
-}
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const city = searchParams.get("city") || "Istanbul";
-  const size = searchParams.get("size") || "12";
-
-  // No API key → return fallback events
-  if (!TM_API_KEY) {
-    return NextResponse.json({
-      source: "fallback",
-      events: FALLBACK_EVENTS,
-      message: "Ticketmaster API key tanımlı değil. Örnek etkinlikler gösteriliyor.",
-    });
-  }
-
+// ─── 1. Etkinlik.io (FREE, no auth) ───
+async function fetchEtkinlikIO(query: string): Promise<EventItem[]> {
   try {
-    const params = new URLSearchParams({
-      apikey: TM_API_KEY,
-      countryCode: "TR",
-      city,
-      includeFamily: "only",
-      size,
-      sort: "date,asc",
-    });
-
-    const res = await fetch(`${TM_BASE}?${params}`, {
-      next: { revalidate: 3600 }, // Cache 1 hour
-    });
-
-    if (!res.ok) {
-      // API error → fallback
-      return NextResponse.json({
-        source: "fallback",
-        events: FALLBACK_EVENTS,
-        message: `Ticketmaster API hata: ${res.status}`,
-      });
-    }
+    const res = await fetch(
+      `https://etkinlik.io/site-api/search?query=${encodeURIComponent(query)}`,
+      { next: { revalidate: 3600 } }
+    );
+    if (!res.ok) return [];
 
     const data = await res.json();
-    const embedded = data._embedded;
+    const events: EventItem[] = [];
 
-    if (!embedded?.events || embedded.events.length === 0) {
-      // No family events → try without family filter
-      const generalParams = new URLSearchParams({
-        apikey: TM_API_KEY,
-        countryCode: "TR",
-        city,
-        size,
-        sort: "date,asc",
-      });
-
-      const generalRes = await fetch(`${TM_BASE}?${generalParams}`, {
-        next: { revalidate: 3600 },
-      });
-
-      if (!generalRes.ok) {
-        return NextResponse.json({
-          source: "fallback",
-          events: FALLBACK_EVENTS,
+    for (const group of data.results || []) {
+      const cityName = group.name || group.title || "";
+      for (const item of group.results || group.items || []) {
+        events.push({
+          id: `etk-${events.length}`,
+          name: item.title || "",
+          date: item.description || "",
+          time: "",
+          venue: "",
+          city: cityName,
+          image: "",
+          url: item.url || "#",
+          category: queryCategoryMap(query),
+          source: "etkinlik.io",
         });
       }
+    }
 
-      const generalData = await generalRes.json();
-      const generalEvents = generalData._embedded?.events || [];
+    return events;
+  } catch {
+    return [];
+  }
+}
 
-      return NextResponse.json({
-        source: "ticketmaster",
-        events: generalEvents.map(formatTMEvent),
-        total: generalData.page?.totalElements || 0,
-      });
+function queryCategoryMap(query: string): string {
+  const map: Record<string, string> = {
+    cocuk: "Çocuk",
+    tiyatro: "Tiyatro",
+    konser: "Konser",
+    atolye: "Atölye",
+    sergi: "Sergi",
+    festival: "Festival",
+    istanbul: "Etkinlik",
+  };
+  return map[query.toLowerCase()] || "Etkinlik";
+}
+
+// ─── 2. Kultur Istanbul - IBB (FREE, WordPress REST API) ───
+async function fetchKulturIstanbul(): Promise<EventItem[]> {
+  try {
+    const res = await fetch(
+      "https://kultur.istanbul/wp-json/wp/v2/event_listing?per_page=20&_fields=id,title,link,date,content,event_listing_type",
+      { next: { revalidate: 3600 } }
+    );
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return data.map((item: Record<string, unknown>) => {
+      const title = item.title as { rendered: string } | undefined;
+      const content = item.content as { rendered: string } | undefined;
+
+      // Extract date from content HTML if possible
+      const dateMatch = content?.rendered?.match(
+        /(\d{1,2})\s*(Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)\s*(\d{4})?/i
+      );
+      const dateStr = dateMatch ? dateMatch[0] : "";
+
+      // Extract venue from content
+      const venueMatch = content?.rendered?.match(
+        /(?:Mekan|Yer|Salon)[:\s]*([^<\n]+)/i
+      );
+      const venue = venueMatch ? venueMatch[1].trim() : "";
+
+      return {
+        id: `ibb-${item.id}`,
+        name: title?.rendered || "",
+        date: dateStr || (item.date as string)?.slice(0, 10) || "",
+        time: "",
+        venue,
+        city: "İstanbul",
+        image: "",
+        url: (item.link as string) || "#",
+        category: "Kültür",
+        source: "kultur.istanbul",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+// ─── 3. TheSportsDB (FREE, no auth, key=3) ───
+const SPORTS_DB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
+
+interface SportsDBEvent {
+  idEvent: string;
+  strEvent: string;
+  strLeague: string;
+  strSport: string;
+  strHomeTeam: string;
+  strAwayTeam: string;
+  dateEvent: string;
+  strTime: string;
+  strTimestamp: string;
+  strVenue: string;
+  intHomeScore: string | null;
+  intAwayScore: string | null;
+  strStatus: string;
+  strThumb: string;
+  strPoster: string;
+}
+
+async function fetchTurkishSports(): Promise<EventItem[]> {
+  const events: EventItem[] = [];
+
+  // Get today's date
+  const today = new Date();
+  const dateStr = today.toISOString().slice(0, 10);
+
+  // Try multiple approaches to get Turkish football matches
+  const urls = [
+    // Today's events by date
+    `${SPORTS_DB_BASE}/eventsday.php?d=${dateStr}&s=Soccer`,
+    // Search for specific Turkish teams
+    `${SPORTS_DB_BASE}/searchevents.php?e=Galatasaray`,
+    `${SPORTS_DB_BASE}/searchevents.php?e=Fenerbahce`,
+    `${SPORTS_DB_BASE}/searchevents.php?e=Besiktas`,
+    // Turkish Super Lig next events
+    `${SPORTS_DB_BASE}/eventsnextleague.php?id=4339`,
+    // Turkish Basketball Super Lig
+    `${SPORTS_DB_BASE}/eventsnextleague.php?id=4654`,
+  ];
+
+  const seenIds = new Set<string>();
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { next: { revalidate: 1800 } }); // 30 min cache
+      if (!res.ok) continue;
+
+      const data = await res.json();
+      const rawEvents: SportsDBEvent[] = data.events || data.event || [];
+
+      for (const ev of rawEvents) {
+        if (!ev || seenIds.has(ev.idEvent)) continue;
+
+        // Filter: only Turkish league events or events with Turkish teams
+        const isTurkish =
+          ev.strLeague?.toLowerCase().includes("turkish") ||
+          ev.strLeague?.toLowerCase().includes("türk") ||
+          ev.strLeague?.toLowerCase().includes("süper lig") ||
+          isTurkishTeam(ev.strHomeTeam) ||
+          isTurkishTeam(ev.strAwayTeam);
+
+        if (!isTurkish) continue;
+
+        seenIds.add(ev.idEvent);
+
+        const score =
+          ev.intHomeScore != null && ev.intAwayScore != null
+            ? `${ev.intHomeScore} - ${ev.intAwayScore}`
+            : undefined;
+
+        events.push({
+          id: `sport-${ev.idEvent}`,
+          name: ev.strEvent || `${ev.strHomeTeam} vs ${ev.strAwayTeam}`,
+          date: ev.dateEvent || "",
+          time: ev.strTime?.slice(0, 5) || "",
+          venue: ev.strVenue || "",
+          city: "",
+          image: ev.strThumb || ev.strPoster || "",
+          url: `https://www.thesportsdb.com/event/${ev.idEvent}`,
+          category: ev.strSport === "Soccer" ? "Futbol" : ev.strSport === "Basketball" ? "Basketbol" : (ev.strSport || "Spor"),
+          source: "thesportsdb",
+          priceRange: score,
+        });
+      }
+    } catch {
+      // continue with other URLs
+    }
+  }
+
+  return events;
+}
+
+const TURKISH_TEAMS = [
+  "galatasaray", "fenerbahce", "fenerbahçe", "besiktas", "beşiktaş",
+  "trabzonspor", "basaksehir", "başakşehir", "adana demirspor",
+  "antalyaspor", "alanyaspor", "sivasspor", "konyaspor",
+  "kayserispor", "kasimpasa", "kasımpaşa", "gaziantep",
+  "hatayspor", "rizespor", "pendikspor", "samsunspor",
+  "ankaragücü", "ankaragucu", "bodrum", "eyüpspor", "eyupspor",
+  "göztepe", "goztepe", "anadolu efes", "pinar karsiyaka",
+];
+
+function isTurkishTeam(team: string): boolean {
+  if (!team) return false;
+  const lower = team.toLowerCase();
+  return TURKISH_TEAMS.some((t) => lower.includes(t));
+}
+
+// ─── Main handler ───
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const tab = searchParams.get("tab") || "all"; // all | cocuk | tiyatro | spor | kultur
+
+  try {
+    let allEvents: EventItem[] = [];
+
+    if (tab === "all" || tab === "cocuk") {
+      const cocukEvents = await fetchEtkinlikIO("cocuk");
+      allEvents.push(...cocukEvents);
+    }
+
+    if (tab === "all" || tab === "tiyatro") {
+      const tiyatroEvents = await fetchEtkinlikIO("tiyatro");
+      allEvents.push(...tiyatroEvents);
+    }
+
+    if (tab === "all" || tab === "spor") {
+      const sportEvents = await fetchTurkishSports();
+      allEvents.push(...sportEvents);
+    }
+
+    if (tab === "all" || tab === "kultur") {
+      const kulturEvents = await fetchKulturIstanbul();
+      allEvents.push(...kulturEvents);
+    }
+
+    if (tab === "konser") {
+      const konserEvents = await fetchEtkinlikIO("konser");
+      allEvents.push(...konserEvents);
+    }
+
+    // Deduplicate by name (case-insensitive)
+    const seen = new Set<string>();
+    allEvents = allEvents.filter((e) => {
+      const key = e.name.toLowerCase().trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Filter to Istanbul if requested
+    const city = searchParams.get("city");
+    if (city) {
+      allEvents = allEvents.filter(
+        (e) =>
+          !e.city ||
+          e.city.toLowerCase().includes(city.toLowerCase()) ||
+          e.city === ""
+      );
     }
 
     return NextResponse.json({
-      source: "ticketmaster",
-      events: embedded.events.map(formatTMEvent),
-      total: data.page?.totalElements || 0,
+      events: allEvents.slice(0, 30),
+      total: allEvents.length,
+      sources: ["etkinlik.io", "kultur.istanbul", "thesportsdb"],
     });
   } catch {
     return NextResponse.json({
-      source: "fallback",
-      events: FALLBACK_EVENTS,
-      message: "API bağlantı hatası",
+      events: [],
+      total: 0,
+      error: "Veri çekilirken hata oluştu",
     });
   }
 }
